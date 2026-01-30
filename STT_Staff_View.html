@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STT 員工端操作演示</title>
+    <!-- Vue 3 -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- SweetAlert2 -->
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        .slide-enter-active, .slide-leave-active { transition: all 0.3s ease; }
+        .slide-enter-from, .slide-leave-to { opacity: 0; transform: translateX(20px); }
+        /* 簽名板樣式 */
+        canvas { touch-action: none; }
+    </style>
+</head>
+<body class="bg-gray-100 h-screen overflow-hidden">
+
+<div id="app" class="h-full flex flex-col max-w-md mx-auto bg-white shadow-2xl relative">
+
+    <!-- 頂部導航欄 -->
+    <header class="bg-slate-800 text-white p-4 flex justify-between items-center shadow-md z-10">
+        <div class="flex items-center">
+            <button v-if="currentView !== 'dashboard'" @click="goBack" class="mr-3 text-gray-300 hover:text-white">
+                <i class="fas fa-arrow-left"></i>
+            </button>
+            <h1 class="text-lg font-bold tracking-wide">{{ pageTitle }}</h1>
+        </div>
+        <div class="text-xs bg-slate-700 px-2 py-1 rounded">
+            <i class="fas fa-user-circle mr-1"></i> 技師阿豪
+        </div>
+    </header>
+
+    <!-- 主內容區 (Scrollable) -->
+    <main class="flex-1 overflow-y-auto relative p-4 pb-20">
+        
+        <!-- 1. 儀表板 (Dashboard) -->
+        <div v-if="currentView === 'dashboard'" class="space-y-4">
+            <!-- 搜尋與過濾 -->
+            <div class="relative">
+                <input v-model="searchQuery" type="text" placeholder="搜尋車牌或姓名..." 
+                    class="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                <i class="fas fa-search absolute left-3 top-3 text-gray-400"></i>
+            </div>
+
+            <!-- 訂單列表 -->
+            <div v-for="order in filteredOrders" :key="order.id" @click="editOrder(order)"
+                class="bg-white border rounded-xl p-4 shadow-sm active:bg-gray-50 transition cursor-pointer relative overflow-hidden">
+                <!-- 狀態標籤 -->
+                <div :class="getStatusClass(order.status)" class="absolute top-0 right-0 px-3 py-1 text-xs font-bold rounded-bl-xl">
+                    {{ getStatusLabel(order.status) }}
+                </div>
+                
+                <div class="flex justify-between items-start mt-2">
+                    <div>
+                        <h3 class="text-xl font-bold text-gray-800">{{ order.client.plate }}</h3>
+                        <p class="text-sm text-gray-500">{{ order.client.model }} | {{ order.client.name }}</p>
+                    </div>
+                </div>
+                
+                <div class="mt-4 flex justify-between items-end border-t pt-3">
+                    <div class="text-xs text-gray-400">
+                        <i class="far fa-clock mr-1"></i> {{ order.date }}
+                    </div>
+                    <div class="text-lg font-bold text-slate-700">
+                        ${{ formatMoney(order.total_amount) }}
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 空狀態 -->
+            <div v-if="filteredOrders.length === 0" class="text-center text-gray-400 mt-10">
+                <i class="fas fa-box-open text-4xl mb-2"></i>
+                <p>沒有找到相關工單</p>
+            </div>
+        </div>
+
+        <!-- 2. 工單編輯/建立頁 (Edit Order) -->
+        <div v-else-if="currentView === 'edit'" class="space-y-6">
+            
+            <!-- 紙本模式切換開關 -->
+            <div class="flex justify-between items-center bg-blue-50 p-3 rounded-lg border border-blue-100">
+                <span class="text-sm font-bold text-blue-800">
+                    <i class="fas fa-camera mr-1"></i> 紙本轉錄模式
+                </span>
+                <button @click="togglePaperMode" 
+                    :class="isPaperMode ? 'bg-blue-600' : 'bg-gray-300'"
+                    class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none">
+                    <span :class="isPaperMode ? 'translate-x-6' : 'translate-x-1'"
+                        class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform"></span>
+                </button>
+            </div>
+
+            <!-- 客戶與車輛資訊 -->
+            <div class="bg-white p-4 rounded-xl border shadow-sm space-y-3">
+                <h3 class="font-bold text-gray-700 border-b pb-2">基本資訊</h3>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="text-xs text-gray-500">車牌號碼 *</label>
+                        <input v-model="form.client.plate" type="text" class="w-full border-b focus:border-blue-500 outline-none py-1 font-mono uppercase" placeholder="ABC-123">
+                    </div>
+                    <div>
+                        <label class="text-xs text-gray-500">車型</label>
+                        <input v-model="form.client.model" type="text" class="w-full border-b focus:border-blue-500 outline-none py-1" placeholder="Tesla Model 3">
+                    </div>
+                    <div>
+                        <label class="text-xs text-gray-500">客戶姓名</label>
+                        <input v-model="form.client.name" type="text" class="w-full border-b focus:border-blue-500 outline-none py-1" placeholder="王小明">
+                    </div>
+                    <div>
+                        <label class="text-xs text-gray-500">聯絡電話</label>
+                        <input v-model="form.client.phone" type="tel" class="w-full border-b focus:border-blue-500 outline-none py-1" placeholder="0912...">
+                    </div>
+                </div>
+            </div>
+
+            <!-- A. 紙本模式 UI -->
+            <div v-if="isPaperMode" class="bg-white p-4 rounded-xl border shadow-sm space-y-4 border-l-4 border-l-blue-500">
+                <div class="text-center p-6 border-2 border-dashed border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer active:bg-gray-100 transition">
+                    <i class="fas fa-camera text-3xl text-gray-400 mb-2"></i>
+                    <p class="text-sm text-gray-500">點擊拍攝紙本工單</p>
+                    <p class="text-xs text-gray-400 mt-1">(僅需輸入總金額，細節以照片為準)</p>
+                </div>
+                <div>
+                    <label class="text-sm font-bold text-gray-700">工單總金額 *</label>
+                    <div class="relative mt-1">
+                        <span class="absolute left-3 top-2 text-gray-500">$</span>
+                        <input v-model.number="form.total_amount" type="number" class="w-full pl-8 pr-4 py-2 border rounded-lg text-lg font-bold">
+                    </div>
+                </div>
+            </div>
+
+            <!-- B. 數位填單模式 UI -->
+            <div v-else class="space-y-3">
+                <div class="flex justify-between items-center">
+                    <h3 class="font-bold text-gray-700">施工項目</h3>
+                    <button @click="addItem" class="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded text-gray-600">
+                        <i class="fas fa-plus"></i> 新增
+                    </button>
+                </div>
+                
+                <div v-for="(item, index) in form.items" :key="index" class="bg-white p-3 rounded-lg border shadow-sm relative">
+                    <button @click="removeItem(index)" class="absolute top-2 right-2 text-red-400 hover:text-red-600">
+                        <i class="fas fa-times"></i>
+                    </button>
+                    <div class="grid grid-cols-1 gap-2">
+                        <input v-model="item.part" placeholder="施工部位 (如: 引擎蓋)" class="text-sm border-b py-1 outline-none font-bold">
+                        <input v-model="item.material" placeholder="使用膜料 (如: 3M 2080)" class="text-xs border-b py-1 outline-none text-gray-600">
+                        <div class="flex items-center mt-1">
+                            <span class="text-xs text-gray-500 mr-2">價格 $</span>
+                            <input v-model.number="item.price" type="number" class="w-24 border rounded px-1 text-sm">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 總計區塊 -->
+                <div class="flex justify-end items-center mt-4 p-2 bg-gray-50 rounded text-gray-700">
+                    <span class="mr-2 text-sm">預估總計:</span>
+                    <span class="text-xl font-bold">${{ formatMoney(digitalTotal) }}</span>
+                </div>
+            </div>
+
+            <!-- 底部動作按鈕 -->
+            <div class="pt-4 flex gap-3">
+                <button @click="saveDraft" class="flex-1 bg-gray-200 text-gray-700 py-3 rounded-lg font-bold active:bg-gray-300">
+                    <i class="fas fa-save mr-1"></i> 暫存
+                </button>
+                <button @click="goToSign" class="flex-1 bg-slate-800 text-white py-3 rounded-lg font-bold active:bg-slate-900 shadow-lg">
+                    前往簽名 <i class="fas fa-arrow-right ml-1"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- 3. 客戶簽核頁 (Signing) -->
+        <div v-else-if="currentView === 'sign'" class="flex flex-col h-full pb-0">
+            <!-- 訂單摘要 -->
+            <div class="bg-gray-50 p-3 rounded-lg mb-3 text-sm border">
+                <div class="flex justify-between font-bold">
+                    <span>{{ form.client.plate }}</span>
+                    <span>${{ formatMoney(isPaperMode ? form.total_amount : digitalTotal) }}</span>
+                </div>
+                <div class="text-xs text-gray-500 mt-1">
+                    {{ isPaperMode ? '紙本轉錄訂單' : form.items.map(i=>i.part).join(', ') }}
+                </div>
+            </div>
+
+            <!-- 強制閱讀條款 -->
+            <div class="flex-1 bg-white border rounded-lg p-4 overflow-y-auto text-xs text-gray-600 mb-3 relative"
+                 @scroll="handleScroll">
+                <h4 class="font-bold text-sm text-gray-800 mb-2">施工服務條款與免責聲明</h4>
+                <p class="mb-2">1. 為確保雙方權益，請於施工前詳閱本條款。</p>
+                <p class="mb-2">2. 車輛若有原廠烤漆瑕疵、補土或重烤漆狀況，撕除膜料時可能有掉漆風險，本店不負賠償責任。</p>
+                <p class="mb-2">3. 完工交車後，請依照店家指示進行保養（如勿打蠟、避免自動洗車機）。</p>
+                <p class="mb-2">4. 保固範圍僅限於非人為因素之膜料起泡、翹邊。</p>
+                <p class="mb-2">5. 人為因素（如高壓水槍近距離沖洗邊緣、石頭擊傷）造成之損壞不在保固範圍。</p>
+                <p class="mb-2">6. 施工期間本店將盡善良管理人之責任保管車輛。</p>
+                <p class="mb-2">7. 貴重物品請自行帶走，車內物品若有遺失本店不負保管責任。</p>
+                <p class="mb-2">8. 簽名即代表您已充分了解並同意上述條款。</p>
+                <div class="h-10"></div> <!-- 墊高讓卷軸好滑 -->
+                <div v-if="!canSign" class="absolute bottom-0 left-0 right-0 bg-white/90 text-center py-2 text-red-500 font-bold border-t">
+                    <i class="fas fa-arrow-down animate-bounce"></i> 請滑動到底部以啟用簽名
+                </div>
+            </div>
+
+            <!-- 簽名板 -->
+            <div class="bg-white border-2 border-dashed border-gray-300 rounded-lg touch-none relative mb-4">
+                <canvas id="signature-pad" class="w-full h-40 cursor-crosshair"></canvas>
+                <div class="absolute bottom-2 right-2 text-xs text-gray-400 select-none pointer-events-none">
+                    在此區域簽名
+                </div>
+                <button @click="clearSignature" class="absolute top-2 right-2 text-gray-400 hover:text-red-500 p-1">
+                    <i class="fas fa-trash-alt"></i>
+                </button>
+            </div>
+
+            <!-- 確認按鈕 -->
+            <button @click="submitOrder" :disabled="!canSign"
+                :class="canSign ? 'bg-green-600 shadow-green-200' : 'bg-gray-300 cursor-not-allowed'"
+                class="w-full text-white py-4 rounded-xl font-bold text-lg shadow-lg transition-all mb-4">
+                <i class="fas fa-check-circle mr-2"></i> 確認並建立工單
+            </button>
+        </div>
+
+    </main>
+
+    <!-- 底部導航欄 (Floating Action Button) -->
+    <div v-if="currentView === 'dashboard'" class="absolute bottom-6 right-6">
+        <button @click="createNewOrder" class="bg-slate-800 text-white w-14 h-14 rounded-full shadow-2xl flex items-center justify-center hover:bg-slate-700 active:scale-95 transition">
+            <i class="fas fa-plus text-xl"></i>
+        </button>
+    </div>
+
+</div>
+
+<script>
+    const { createApp, reactive, computed, ref, nextTick } = Vue;
+
+    createApp({
+        setup() {
+            // --- 狀態 ---
+            const currentView = ref('dashboard'); // dashboard, edit, sign
+            const searchQuery = ref('');
+            const isPaperMode = ref(false);
+            const canSign = ref(false);
+            
+            // 模擬訂單資料
+            const orders = reactive([
+                { id: 'ORD-001', status: 'Pending_Sign', date: '2023-10-24', total_amount: 25000, client: { plate: 'ABC-8888', model: 'Tesla Model 3', name: '陳先生' } },
+                { id: 'ORD-002', status: 'Drafting', date: '2023-10-25', total_amount: 8500, client: { plate: 'XYZ-1234', model: 'Toyota RAV4', name: '林小姐' } },
+                { id: 'ORD-003', status: 'Admin_Review', date: '2023-10-23', total_amount: 42000, client: { plate: 'BMW-999', model: 'BMW X5', name: '張老闆' } },
+            ]);
+
+            // 表單暫存
+            const form = reactive({
+                id: null,
+                client: { plate: '', model: '', name: '', phone: '' },
+                items: [],
+                total_amount: 0
+            });
+
+            // --- Computed ---
+            const filteredOrders = computed(() => {
+                if (!searchQuery.value) return orders;
+                const q = searchQuery.value.toLowerCase();
+                return orders.filter(o => 
+                    o.client.plate.toLowerCase().includes(q) || 
+                    o.client.name.includes(q)
+                );
+            });
+
+            const pageTitle = computed(() => {
+                if (currentView.value === 'dashboard') return '工單列表';
+                if (currentView.value === 'edit') return form.id ? '編輯工單' : '新增工單';
+                if (currentView.value === 'sign') return '客戶簽核';
+                return 'STT System';
+            });
+
+            const digitalTotal = computed(() => {
+                if (isPaperMode.value) return form.total_amount;
+                return form.items.reduce((sum, item) => sum + (item.price || 0), 0);
+            });
+
+            // --- Methods ---
+            const formatMoney = (val) => {
+                if (!val) return '0';
+                return val.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+            };
+
+            const getStatusLabel = (status) => {
+                const map = {
+                    'Drafting': '草稿',
+                    'Pending_Sign': '待簽名',
+                    'Admin_Review': '已簽名/待審',
+                    'Archived': '已歸檔'
+                };
+                return map[status] || status;
+            };
+
+            const getStatusClass = (status) => {
+                const map = {
+                    'Drafting': 'bg-gray-200 text-gray-600',
+                    'Pending_Sign': 'bg-blue-100 text-blue-600',
+                    'Admin_Review': 'bg-yellow-100 text-yellow-700',
+                    'Archived': 'bg-green-100 text-green-600'
+                };
+                return map[status];
+            };
+
+            const resetForm = () => {
+                form.id = null;
+                form.client = { plate: '', model: '', name: '', phone: '' };
+                form.items = [{ part: '', material: '', price: null }];
+                form.total_amount = 0;
+                isPaperMode.value = false;
+            };
+
+            const createNewOrder = () => {
+                resetForm();
+                currentView.value = 'edit';
+            };
+
+            const editOrder = (order) => {
+                // 實際上這裡會深拷貝資料
+                Object.assign(form, JSON.parse(JSON.stringify(order)));
+                // 為了演示，我們假設如果沒有 items 就是紙本模式
+                if (!form.items || form.items.length === 0) {
+                    isPaperMode.value = true;
+                    form.items = [];
+                } else {
+                    isPaperMode.value = false;
+                }
+                currentView.value = 'edit';
+            };
+
+            const togglePaperMode = () => {
+                isPaperMode.value = !isPaperMode.value;
+                if (isPaperMode.value) {
+                    Swal.fire({
+                        icon: 'info',
+                        title: '已切換為紙本模式',
+                        text: '請拍攝紙本工單，並僅需輸入總金額。',
+                        timer: 1500,
+                        showConfirmButton: false
+                    });
+                }
+            };
+
+            const addItem = () => {
+                form.items.push({ part: '', material: '', price: null });
+            };
+
+            const removeItem = (index) => {
+                form.items.splice(index, 1);
+            };
+
+            const goBack = () => {
+                if (currentView.value === 'sign') {
+                    currentView.value = 'edit';
+                } else {
+                    currentView.value = 'dashboard';
+                }
+            };
+
+            const saveDraft = () => {
+                Swal.fire({
+                    icon: 'success',
+                    title: '已暫存',
+                    text: '資料已儲存至系統',
+                    timer: 1500,
+                    showConfirmButton: false
+                }).then(() => {
+                    currentView.value = 'dashboard';
+                });
+            };
+
+            const goToSign = () => {
+                // 簡單驗證
+                if (!form.client.plate) {
+                    Swal.fire('錯誤', '請輸入車牌號碼', 'error');
+                    return;
+                }
+                currentView.value = 'sign';
+                canSign.value = false;
+                nextTick(() => initCanvas());
+            };
+
+            const handleScroll = (e) => {
+                const { scrollTop, offsetHeight, scrollHeight } = e.target;
+                if (scrollTop + offsetHeight >= scrollHeight - 5) { // 寬容度
+                    canSign.value = true;
+                }
+            };
+
+            // Canvas Logic
+            let canvas, ctx;
+            const initCanvas = () => {
+                canvas = document.getElementById('signature-pad');
+                if (!canvas) return;
+                
+                // 設定畫布大小符合容器
+                const rect = canvas.parentElement.getBoundingClientRect();
+                canvas.width = rect.width;
+                canvas.height = 160; // 固定高度
+                
+                ctx = canvas.getContext('2d');
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = '#000';
+                ctx.lineCap = 'round';
+
+                // 事件綁定 (Mouse & Touch)
+                let isDrawing = false;
+                const startDraw = (e) => {
+                    isDrawing = true;
+                    ctx.beginPath();
+                    const { offsetX, offsetY } = getPos(e);
+                    ctx.moveTo(offsetX, offsetY);
+                };
+                const draw = (e) => {
+                    if (!isDrawing) return;
+                    e.preventDefault(); // 防止滾動
+                    const { offsetX, offsetY } = getPos(e);
+                    ctx.lineTo(offsetX, offsetY);
+                    ctx.stroke();
+                };
+                const stopDraw = () => { isDrawing = false; };
+
+                canvas.addEventListener('mousedown', startDraw);
+                canvas.addEventListener('mousemove', draw);
+                canvas.addEventListener('mouseup', stopDraw);
+                canvas.addEventListener('touchstart', startDraw);
+                canvas.addEventListener('touchmove', draw);
+                canvas.addEventListener('touchend', stopDraw);
+            };
+
+            const getPos = (e) => {
+                if (e.touches && e.touches.length > 0) {
+                    const rect = canvas.getBoundingClientRect();
+                    return {
+                        offsetX: e.touches[0].clientX - rect.left,
+                        offsetY: e.touches[0].clientY - rect.top
+                    };
+                }
+                return { offsetX: e.offsetX, offsetY: e.offsetY };
+            };
+
+            const clearSignature = () => {
+                if (ctx && canvas) {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                }
+            };
+
+            const submitOrder = () => {
+                // 模擬後端呼叫
+                const loading = Swal.fire({
+                    title: '處理中...',
+                    text: '正在上傳簽名並建立工單',
+                    allowOutsideClick: false,
+                    didOpen: () => Swal.showLoading()
+                });
+
+                setTimeout(() => {
+                    loading.close();
+                    Swal.fire({
+                        icon: 'success',
+                        title: '工單建立成功！',
+                        text: '單號：ORD-20231030-888',
+                        confirmButtonText: '回到列表'
+                    }).then(() => {
+                        currentView.value = 'dashboard';
+                    });
+                }, 1500);
+            };
+
+            return {
+                currentView, searchQuery, filteredOrders, pageTitle,
+                form, isPaperMode, digitalTotal, canSign,
+                formatMoney, getStatusLabel, getStatusClass,
+                createNewOrder, editOrder, togglePaperMode,
+                addItem, removeItem, goBack, saveDraft, goToSign,
+                handleScroll, clearSignature, submitOrder
+            };
+        }
+    }).mount('#app');
+</script>
+</body>
+</html>
